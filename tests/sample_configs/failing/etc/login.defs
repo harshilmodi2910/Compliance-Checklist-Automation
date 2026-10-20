@@ -1,0 +1,7 @@
+# sample login.defs for the failing demo target
+MAIL_DIR        /var/mail
+ENCRYPT_METHOD  SHA512
+
+PASS_MAX_DAYS   99999
+PASS_MIN_DAYS   0
+PASS_WARN_AGE   0

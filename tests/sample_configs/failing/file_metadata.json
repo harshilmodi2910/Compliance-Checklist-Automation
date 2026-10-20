@@ -1,0 +1,5 @@
+{
+  "/etc/passwd": {"mode": "0666", "owner": "root", "group": "root"},
+  "/etc/shadow": {"mode": "0644", "owner": "root", "group": "root"},
+  "/etc/ssh/sshd_config": {"mode": "0644", "owner": "root", "group": "root"}
+}

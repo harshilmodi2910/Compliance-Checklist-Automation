@@ -1,0 +1,8 @@
+# sample sshd_config for the failing demo target
+Port 22
+UsePAM yes
+
+PermitRootLogin yes
+PermitEmptyPasswords yes
+MaxAuthTries 6
+X11Forwarding yes
