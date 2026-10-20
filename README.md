@@ -93,7 +93,7 @@ I ended up with a small table of OpenSSH defaults in `checks.py`, and the report
 
 ## Limitations
 
-- **sshd_config is read as one file.** Ubuntu 22.04's stock file starts with an `Include` for `/etc/ssh/sshd_config.d/*.conf`. Since sshd keeps the first value it sees, a drop-in file can override what this tool reports. `Match` blocks are skipped too.
+- **sshd_config handling is partial.** `Include` lines are followed where they appear, since Ubuntu 22.04's stock file starts with one for `/etc/ssh/sshd_config.d/*.conf` and sshd keeps the first value it sees. Relative include paths are taken from `/etc/ssh`, matching files are read in sorted order, and nesting stops after 5 levels. `Match` blocks are skipped, and I stop reading at the first `Match` line even if it sits inside an included file. I'm not sure sshd scopes a `Match` the same way there, so a setting after it could be read differently than sshd would.
 - **UFW is checked through its config file only.** `ENABLED=yes` in `ufw.conf` says nothing about whether ufw is running or what rules are loaded.
 - **Password length only looks at `pwquality.conf`.** `minlen` can also be set in the PAM config under `/etc/pam.d`, and I don't read that, or `pwquality.conf.d`.
 - **Password aging checks only see the defaults for new accounts.** Existing accounts keep their own settings in `/etc/shadow`, and the tool never reads that file's contents.
@@ -109,7 +109,7 @@ pip install -r requirements.txt
 python -m pytest
 ```
 
-There are 31 tests and none need root. Most build a small fake root directory in a temp folder, write the config files that test needs, and run the checks against it. Every rule has passing and failing cases, with boundary values like 365 and 366 where a number is involved. Other tests cover missing files, commented-out lines, sshd's first-value-wins behavior, `Match` blocks, the report formats, and the CLI exit codes. The one place I patch anything is file reading, to fake a permission error. The same workflow runs in GitHub Actions on Python 3.9 and 3.12.
+There are 37 tests and none need root. Most build a small fake root directory in a temp folder, write the config files that test needs, and run the checks against it. Every rule has passing and failing cases, with boundary values like 365 and 366 where a number is involved. Other tests cover missing files, commented-out lines, sshd's first-value-wins behavior, `Include` ordering, `Match` blocks, the report formats, and the CLI exit codes. The one place I patch anything is file reading, to fake a permission error. The same workflow runs in GitHub Actions on Python 3.9 and 3.12.
 
 ## Layout
 

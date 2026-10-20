@@ -62,6 +62,15 @@ class SystemReader:
     def path_for(self, path):
         return self.root / path.lstrip("/")
 
+    def glob(self, pattern):
+        """Expand a pattern like /etc/ssh/sshd_config.d/*.conf under the root.
+
+        Returns paths in sorted order, which is the order sshd reads them as
+        far as I can tell (it uses glob(3), which sorts).
+        """
+        found = sorted(self.root.glob(pattern.lstrip("/")))
+        return ["/" + m.relative_to(self.root).as_posix() for m in found if m.is_file()]
+
     def read_text(self, path):
         return self.path_for(path).read_text(encoding="utf-8", errors="replace")
 
@@ -147,23 +156,66 @@ def parse_key_value(text):
     return values
 
 
-def parse_sshd_config(text):
+# How deep Include lines can nest before I stop following them. This is only
+# here so a file that includes itself cannot loop forever.
+MAX_INCLUDE_DEPTH = 5
+SSH_DIR = "/etc/ssh"
+
+
+class _SshdParser:
+    """Collects global sshd settings, following Include lines where they appear."""
+
+    def __init__(self, reader):
+        self.reader = reader
+        self.values = {}
+        self.stopped = False  # set at the first Match line
+
+    def feed(self, text, depth=0):
+        for line in _meaningful_lines(text):
+            if self.stopped:
+                return
+            parts = re.split(r"[\s=]+", line, maxsplit=1)
+            keyword = parts[0].lower()
+            if keyword == "match":
+                # Everything after a Match line belongs to a Match block, which
+                # runs until the next Match or the end of the file. So I treat
+                # it as the end of the global settings. I do this even when the
+                # Match line is inside an included file, and I am not sure sshd
+                # scopes it the same way there.
+                self.stopped = True
+                return
+            if len(parts) != 2:
+                continue
+            if keyword == "include":
+                self._include(parts[1], depth)
+            elif keyword not in self.values:
+                self.values[keyword] = parts[1].strip().strip('"')
+
+    def _include(self, argument, depth):
+        if self.reader is None or depth >= MAX_INCLUDE_DEPTH:
+            return
+        for pattern in argument.split():
+            pattern = pattern.strip('"')
+            if not pattern.startswith("/"):
+                # relative patterns are taken from /etc/ssh
+                pattern = f"{SSH_DIR}/{pattern}"
+            for path in self.reader.glob(pattern):
+                self.feed(self.reader.read_text(path), depth + 1)
+                if self.stopped:
+                    return
+
+
+def parse_sshd_config(text, reader=None):
     """Keyword value, or Keyword=value. Keywords are case-insensitive.
 
     sshd keeps the FIRST value it sees for a keyword, so that is what I keep.
+    An Include line is read right where it appears, so a drop-in file listed
+    at the top of the main file wins over settings further down. Without a
+    reader, Include lines are ignored.
     """
-    values = {}
-    for line in _meaningful_lines(text):
-        parts = re.split(r"[\s=]+", line, maxsplit=1)
-        keyword = parts[0].lower()
-        if keyword == "match":
-            # Everything after the first Match line belongs to a Match block,
-            # which runs until the next Match or the end of the file. So there
-            # is nothing global left to read.
-            break
-        if len(parts) == 2 and keyword not in values:
-            values[keyword] = parts[1].strip().strip('"')
-    return values
+    parser = _SshdParser(reader)
+    parser.feed(text)
+    return parser.values
 
 
 # The two kinds of check.
@@ -200,7 +252,7 @@ def check_setting(reader, rule):
     text = reader.read_text(rule.source)
     if rule.source == SSHD_CONFIG:
         key = rule.setting.lower()
-        raw = parse_sshd_config(text).get(key)
+        raw = parse_sshd_config(text, reader).get(key)
         note = ""
         if raw is None:
             raw = SSHD_DEFAULTS.get(key)
@@ -244,8 +296,9 @@ def _run_one(reader, rule):
         return Result(rule, FAIL, str(exc))
     except FileNotFoundError:
         return Result(rule, FAIL, f"{rule.source} was not found")
-    except PermissionError:
-        return Result(rule, ERROR, f"not allowed to read {rule.source}, try running with sudo")
+    except PermissionError as exc:
+        name =getattr(exc, "filename", None) or rule.source
+        return Result(rule, ERROR, f"not allowed to read {name}, try running with sudo")
     except (MetadataError, OSError) as exc:
         return Result(rule, ERROR, str(exc))
 

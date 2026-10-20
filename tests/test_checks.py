@@ -187,6 +187,61 @@ def test_sshd_match_block_is_ignored(tmp_path):
     assert status(tmp_path, "SSH-1", {"etc/ssh/sshd_config": text}) == PASS
 
 
+INCLUDE = "Include /etc/ssh/sshd_config.d/*.conf\n"
+DROPIN = "etc/ssh/sshd_config.d/50-local.conf"
+
+
+def test_sshd_include_dropin_wins_when_include_comes_first(tmp_path):
+    # this is the layout of Ubuntu 22.04's stock file, Include at the top
+    files = {
+        "etc/ssh/sshd_config": INCLUDE + "PermitRootLogin yes\n",
+        DROPIN: "PermitRootLogin no\n",
+    }
+    assert status(tmp_path, "SSH-1", files) == PASS
+
+
+def test_sshd_main_value_wins_when_it_comes_before_include(tmp_path):
+    files = {
+        "etc/ssh/sshd_config": "PermitRootLogin yes\n" + INCLUDE,
+        DROPIN: "PermitRootLogin no\n",
+    }
+    assert status(tmp_path, "SSH-1", files) == FAIL
+
+
+def test_sshd_include_files_are_read_in_sorted_order(tmp_path):
+    files = {
+        "etc/ssh/sshd_config": INCLUDE,
+        "etc/ssh/sshd_config.d/10-a.conf": "PermitRootLogin yes\n",
+        "etc/ssh/sshd_config.d/20-b.conf": "PermitRootLogin no\n",
+    }
+    assert status(tmp_path, "SSH-1", files) == FAIL
+    files["etc/ssh/sshd_config.d/10-a.conf"] = "PermitRootLogin no\n"
+    files["etc/ssh/sshd_config.d/20-b.conf"] = "PermitRootLogin yes\n"
+    assert status(tmp_path, "SSH-1", files) == PASS
+
+
+def test_sshd_relative_include_path_is_taken_from_etc_ssh(tmp_path):
+    files = {
+        "etc/ssh/sshd_config": "Include sshd_config.d/*.conf\n",
+        DROPIN: "PermitRootLogin no\n",
+    }
+    assert status(tmp_path, "SSH-1", files) == PASS
+
+
+def test_sshd_include_with_no_matching_files_is_fine(tmp_path):
+    files = {"etc/ssh/sshd_config": INCLUDE + "PermitRootLogin no\n"}
+    assert status(tmp_path, "SSH-1", files) == PASS
+
+
+def test_sshd_include_loop_stops(tmp_path):
+    # the drop-in includes the same directory, so it ends up including itself
+    files = {
+        "etc/ssh/sshd_config": INCLUDE,
+        DROPIN: INCLUDE + "PermitRootLogin no\n",
+    }
+    assert status(tmp_path, "SSH-1", files) == PASS
+
+
 def test_sshd_default_is_used_when_keyword_is_missing(tmp_path):
     only_x11 = {"etc/ssh/sshd_config": "X11Forwarding no\n"}
     # the OpenSSH default for PermitEmptyPasswords is no, so this passes

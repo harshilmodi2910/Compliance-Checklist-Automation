@@ -1,4 +1,6 @@
 # sample sshd_config for the passing demo target
+Include /etc/ssh/sshd_config.d/*.conf
+
 Port 22
 UsePAM yes
 
